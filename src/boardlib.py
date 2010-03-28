@@ -1,5 +1,6 @@
 import socket
 import select
+import sys
 import time
 import pickle
 import tempfile
@@ -15,7 +16,9 @@ del s
 global port
 port = 1770
 
-
+def log(*inputs):
+    sys.stderr.write(''.join(input))
+    sys.stderr.flush()
 
 class NetworkError(Exception): pass
 

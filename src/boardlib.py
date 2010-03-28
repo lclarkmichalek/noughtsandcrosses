@@ -143,16 +143,21 @@ class SyList(list):
         return pickle.load(file)
 
 class SyConn(connection):
-    def __init__(self, list, timeout=5):
+    def __init__(self, list, type='Blocking', timeout=5):
         connection.__init__(self, timeout)
         self.list = SyList(list)
+        self.ctype = type
     
     def __repr__(self):
-        print '<connection: %s>\n<list: %l>' % (self.sock, self.list)
+        print '<connection: %s>\n<list: %s>' % (self.sock, repr(self.list))
     
     def sendList(self):
         self.send(self.list.encode())
     
     def recvList(self):
-        return SyList(self.recive())
-    
+        if self.ctype == 'Blocking':
+            return SyList(self.recive())
+        else:
+            input = self.reciveone()
+            if input == '': return
+            return SyList(input)

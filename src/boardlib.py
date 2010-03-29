@@ -4,21 +4,30 @@ import sys
 import time
 import pickle
 import tempfile
+import random
 
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.connect(('google.com',0))
+TESTING = True
 
 global ip
-ip = s.getsockname()[0]
 
-del s
+if not TESTING:
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(('google.com',0))
+
+    ip = s.getsockname()[0]
+
+    del s
+else:
+    ip = '127.0.0.1'
 
 global port
-port = 1770
+port = 1772
 
-def log(*inputs):
-    sys.stderr.write(''.join(input))
-    sys.stderr.flush()
+
+def log(*args):
+    for arg in args:
+        sys.stderr.write(str(arg))
+    sys.stderr.write('\n')
 
 class NetworkError(Exception): pass
 
@@ -59,10 +68,12 @@ class connection():
             raise RuntimeError
         class ToLong(Exception): pass
         length = len(content)
-        if length > 100:
+        if length >= 1000:
             raise ToLong
-        if length < 10:
+        elif length < 100:
             length = '0' + str(length)
+        elif length < 10:
+            length = '00' + str(length)
         else:
             length = str(length)
         log(content)
@@ -84,7 +95,7 @@ class connection():
             if self.check()[2]:
                 self.socket.close()
                 raise RuntimeError
-        length = self.socket.recv(2)
+        length = self.socket.recv(3)
         try:
             length = int(length)
         except ValueError:
@@ -105,7 +116,7 @@ class connection():
         else:
             self.moving = 0
             return False
-        length = self.socket.recv(2)
+        length = self.socket.recv(3)
         if length == '':
             return False
         length = int(length)
@@ -118,29 +129,35 @@ class connection():
 
 
 class SyList(list):
-    def __init__(self, input = None):
-        if type(list) == type(str):
-            input = self.decode(input)
-        self.list = input
-        
-    def encode(self, data=-1):
-        if data == -1:
-            data = self.list
-            
-        file = tempfile.NamedTemporaryFile('w+')
-        pickle.dump(data, file)
-        file.flush()
-        file.seek(0)
-        
-        return file.read()
+    def __init__(self, input):
+        if type(input) == str:
+            del self[:]
+            for entry in SyList(self.decode(input)):
+                self.append(entry)
+        else:
+            list.__init__(self, input)
         
     
-    def decoede(self, input):
-        file = tempfile.NamedTemporaryFile('w+')
-        file.write(input)
-        file.flush()
-        file.seek(0)
-        return pickle.load(file)
+    def encode(self, data=None):
+        if data == None:
+            data = self
+            
+        with tempfile.TemporaryFile('w+') as file:
+            pickle.dump(data, file)
+            file.flush()
+            file.seek(0)
+        
+            return file.read().replace('\n','|')
+        
+    
+    def decode(self, input):
+        with tempfile.TemporaryFile('w+') as file:
+            file.write(input.replace('|','\n'))
+            file.flush()
+            file.seek(0)
+            decoded = pickle.load(file)
+            return SyList(decoded)
+        
 
 class SyConn(connection):
     def __init__(self, list, type='Blocking', timeout=5):
@@ -149,15 +166,19 @@ class SyConn(connection):
         self.ctype = type
     
     def __repr__(self):
-        print '<connection: %s>\n<list: %s>' % (self.sock, repr(self.list))
+        return '<connection: %s>\n<list: %s>' % (self.sock, self.list)
     
     def sendList(self):
-        self.send(self.list.encode())
+        self.send(self.list.encode ())
     
     def recvList(self):
         if self.ctype == 'Blocking':
-            return SyList(self.recive())
+            input = self.recive()
+            return SyList(input)
         else:
             input = self.reciveone()
             if input == '': return
             return SyList(input)
+
+if TESTING:
+    a = SyConn([random.randrange(x + 12) for x in range(0,4)])

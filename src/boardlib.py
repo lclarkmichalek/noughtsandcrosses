@@ -24,6 +24,7 @@ else:
 global port
 port = 1772
 
+#==============================================
 
 def log(*args):
     for arg in args:
@@ -35,10 +36,31 @@ def funcDec(f):
         log("Running " + str(f))
     return f
 
+#==============================================
 
 class NetworkError(Exception): pass
 
 class Shutdown(Exception): pass
+
+#==============================================
+
+TYPE_SNAKES = {
+    "BDim": "10x10",
+    "Dice": True,
+    "Count": True,
+    "CType": str,
+    "SyncA": True}
+
+TYPE_NOUGHTS = {
+    "BDim": "3x3",
+    "Dice": False,
+    "Count": False,
+    "CType": int,
+    "SyncA": True}
+
+TYPE_LUDO
+
+#==============================================
 
 class connection(socket.socket):
     @funcDec

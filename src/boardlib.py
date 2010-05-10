@@ -7,18 +7,19 @@ import tempfile
 import random
 
 TESTING = True
+LOGLEVEL = "Verbose"
 
-global ip
+global IP
 
 if not TESTING:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(('google.com',0))
 
-    ip = s.getsockname()[0]
+    IP = s.getsockname()[0]
 
     del s
 else:
-    ip = '127.0.0.1'
+    IP = '127.0.0.1'
 
 global port
 port = 1772
@@ -29,60 +30,64 @@ def log(*args):
         sys.stderr.write(str(arg))
     sys.stderr.write('\n')
 
+def funcDec(f):
+    if LOGLEVEL == "Verbose":
+        log("Running " + str(f))
+    return f
+
+
 class NetworkError(Exception): pass
 
 class Shutdown(Exception): pass
 
-class connection():
+class connection(socket.socket):
+    @funcDec
     def __init__(self, timeout = 5):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        socket.socket.__init__(self, socket.AF_INET, socket.SOCK_STREAM)
         self.timeout = timeout
         self.moving = 0
     
+    @funcDec
     def setServer(self):
-        self.type = 'Server'
-        self.sock.bind((ip, port))
-        self.sock.listen(1)
-        (self.socket, self.address) = self.sock.accept()
-        self.socket.setblocking(0)
+        self.Type = 'Server'
+        self.bind((IP, port))
+        self.listen(1)
+        (self, null) = self.accept()
+        del null
+        self.setblocking(0)
     
+    @funcDec
     def setClient(self, address):
-        self.type = 'Client'
-        self.sock.connect((address, port))
-        self.socket = self.sock
-        self.socket.setblocking(0)
+        self.Type = 'Client'
+        self.connect((address, port))
+        self.setblocking(0)
     
+    @funcDec
     def check(self, timeout = 0):
-        readable, null, null = select.select([self.socket], [], [], timeout)
-        null, writeable, null = select.select([], [self.socket], [], timeout)
-        null, null, errorable = select.select([], [], [self.socket], timeout)
+        readable, null, null = select.select([self], [], [], timeout)
+        null, writeable, null = select.select([], [self], [], timeout)
+        null, null, errorable = select.select([], [], [self], timeout)
         del null
         
         if bool(errorable): raise NetworkError
         
-        return (bool(readable), bool(writeable), bool(errorable))
+        return (bool(readable), bool(writeable))
     
+    @funcDec
     def send(self, content):
-        if self.check()[2]:
-            self.socket.close()
-            raise RuntimeError
         class ToLong(Exception): pass
         length = len(content)
-        if length >= 1000:
+        if length > 100:
             raise ToLong
-        elif length < 100:
+        if length < 10:
             length = '0' + str(length)
-        elif length < 10:
-            length = '00' + str(length)
         else:
             length = str(length)
         log(content)
-        self.socket.send(str(length) + content)
+        socket.socket.send(self, str(length) + content)
     
+    @funcDec
     def recive(self):
-        if self.check()[2]:
-            self.socket.close()
-            raise RuntimeError
         if self.check()[0]:
             self.moving += 1
             log(self.moving)
@@ -92,22 +97,17 @@ class connection():
             self.moving = 0
         while not self.check()[0]:
             time.sleep(0.1)
-            if self.check()[2]:
-                self.socket.close()
-                raise RuntimeError
-        length = self.socket.recv(3)
+        length = self.recv(2)
         try:
             length = int(length)
         except ValueError:
             raise Shutdown
-        content = self.socket.recv(length)
+        content = self.recv(length)
         log (content)
         return content
     
+    @funcDec
     def reciveone(self):
-        if self.check()[2]:
-            self.socket.close()
-            raise RuntimeError
         if self.check()[0]:
             self.moving += 1
             log(self.moving)
@@ -116,16 +116,17 @@ class connection():
         else:
             self.moving = 0
             return False
-        length = self.socket.recv(3)
+        length = self.recv(2)
         if length == '':
             return False
         length = int(length)
-        content = self.socket.recv(length)
+        content = self.recv(length)
         log (content)
         return content
     
+    @funcDec
     def close(self):
-        self.socket.close()
+        socket.socket.close(self)
 
 
 class SyList(list):
@@ -140,7 +141,7 @@ class SyList(list):
     
     def encode(self, data=None):
         if data == None:
-            data = self
+            data = self[:]
             
         with tempfile.TemporaryFile('w+') as file:
             pickle.dump(data, file)
@@ -159,17 +160,18 @@ class SyList(list):
             return SyList(decoded)
         
 
-class SyConn(connection):
+class SyConn(SyList, connection):
     def __init__(self, list, type='Blocking', timeout=5):
+        SyList.__init__(self, list)
         connection.__init__(self, timeout)
-        self.list = SyList(list)
+        
         self.ctype = type
     
     def __repr__(self):
-        return '<connection: %s>\n<list: %s>' % (self.sock, self.list)
+        return '<connection: %s>\n<list: %s>' % (self.sock, self[:])
     
     def sendList(self):
-        self.send(self.list.encode ())
+        self.send(self.encode())
     
     def recvList(self):
         if self.ctype == 'Blocking':

@@ -2,6 +2,7 @@ import select
 import socket
 import threading
 import time
+import json
 
 IP = ""
 PORT = 0
@@ -86,6 +87,19 @@ class EventPool(object):
         self.shutdown()
         time.sleep(interval)
         del self
+
+
+
+class Event(object):
+    def __init__(self, Header="", Content="", Recipients=[], Priority=0):
+        self.header = Header
+        self.content = Content
+        self.recipients = Recipients
+        self.priority = Priority
+    
+    def toJson(self):
+        message = json.dumps([self.header,self.content,self.recipients,self.priority])
+        return message
 
 
 

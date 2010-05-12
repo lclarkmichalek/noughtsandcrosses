@@ -19,16 +19,34 @@ class Server(object):
     def run(self):
         while len(self.Sockets > self._options["Players"]):
             (clientsocket, address) = self._sock.accept()
-            self._threads.addThread(ClientThread(clientsocket))
-
+            self._threads.addThread(ClientThread, address, clientsocket)
+            self._thread.runThread(address)
 
 
 class ThreadPool(object):
     def __init__(self):
         self._threads = []
     
-    def addThread(self, thread):
-        self._threads.append(thread)
+    def addThread(self, thread, id, *args):
+        self._threads[id] = thread(*args)
+        self._threads[id].pool = self
+    
+    def startThread(self, id):
+        self._threads[id].start()
+        self._threads[id].status = "Running"
+    
+    def pauseThread(self, id):
+        self._threads[id].interupt()
+        self._threads[id].status = "Paused"
+    
+    def resumeThread(self, id):
+        self._threads[id].resume()
+        self._threads[id].status = "Running"
+    
+    def killThread(self, id, interval):
+        self._threads[id].interupt()
+        time.sleep(interval)
+        self._threads[id].kill()
 
 
 
@@ -40,6 +58,8 @@ class ClientThread(threading.Thread):
         self._moving = 0
     
     def run(self):
+        self._interupted = False
+        self._killed = False
         while not self._interupted:
             self._checkinterupted()
     
@@ -48,6 +68,9 @@ class ClientThread(threading.Thread):
     
     def resume(self):
         self._interupted = False
+    
+    def kill(self):
+        self._killed = True
     
     def _checkinterupted(self):
         while self._interupted:

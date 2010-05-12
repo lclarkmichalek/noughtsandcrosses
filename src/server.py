@@ -11,7 +11,8 @@ class Server(object):
         self._options = options
         self._sock = socket.socket(socket.AF_INET,
                                   socket.SOCK_STREAM)
-        self._threads = ThreadPool()
+        self._events = EventPool()
+        self._threads = ThreadPool(self._events)
         
         self._sock.bind((IP, PORT))
         self._sock.listen(self._options["Players"])
@@ -24,12 +25,15 @@ class Server(object):
 
 
 class ThreadPool(object):
-    def __init__(self):
-        self._threads = []
+    def __init__(self, eventpool):
+        self._threads = {}
+        self._epool = eventpool
     
     def addThread(self, thread, id, *args):
         self._threads[id] = thread(*args)
-        self._threads[id].pool = self
+        self._threads[id].id = id
+        self._threads[id]._tpool = self
+        self._epool.addThread(self._threads[id])
     
     def startThread(self, id):
         self._threads[id].start()
@@ -47,6 +51,41 @@ class ThreadPool(object):
         self._threads[id].interupt()
         time.sleep(interval)
         self._threads[id].kill()
+
+
+
+class EventPool(object):
+    def __init__(self, threadpool):
+        self._queues = {}
+        self._shutdown = False
+    
+    def addThread(self, thread):
+        self._queues[thread.id] = []
+    
+    def addEvent(self, event):
+        if self._shutdown: return
+        for id in event.recipients:
+            if not id in self._queues.keys():
+                raise RuntimeError("Message addressed to unknown recipient")
+        
+        for id in event.recipients:
+            self._queues[id].appent(event)
+    
+    def queuedEvents(self):
+        id = threading.currentThread().id
+        return len(self._queues[id])
+    
+    def nextEvent(self):
+        id = threading.currentThread().id
+        return self._queues[id].pop(0)
+    
+    def shutdown(self):
+        self._shutdown = True
+    
+    def close(self, interval):
+        self.shutdown()
+        time.sleep(interval)
+        del self
 
 
 

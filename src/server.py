@@ -10,20 +10,14 @@ PORT = 0
 class Server(object):
     def __init__(self, options):
         self._options = options
-        self._sock = socket.socket(socket.AF_INET,
-                                  socket.SOCK_STREAM)
-        self._events = EventPool()
-        self._threads = ThreadPool(self._events)
         
-        self._sock.bind((IP, PORT))
-        self._sock.listen(self._options["Players"])
-        
-    def run(self):
-        while len(self.Sockets > self._options["Players"]):
-            (clientsocket, address) = self._sock.accept()
-            self._threads.addThread(ClientThread, address, clientsocket)
-            self._thread.runThread(address)
+        self._tpool = ThreadPool()
+        self._epool = EventPool(self._tpool)
+    
+    def start(self):
+        self._tpool.addThread(ServerThread, 'Server', self._options)
 
+    
 
 class ThreadPool(object):
     def __init__(self, eventpool):
@@ -52,6 +46,9 @@ class ThreadPool(object):
         self._threads[id].interupt()
         time.sleep(interval)
         self._threads[id].kill()
+        time.sleep(interval)
+        del self._threads[id]
+        self._epool.removeThread(id)
 
 
 
@@ -63,8 +60,12 @@ class EventPool(object):
     def addThread(self, thread):
         self._queues[thread.id] = []
     
+    def removeThread(self, id):
+        del self._queues[id]
+    
     def addEvent(self, event):
         if self._shutdown: return
+        
         for id in event.recipients:
             if not id in self._queues.keys():
                 raise RuntimeError("Message addressed to unknown recipient")
@@ -103,6 +104,29 @@ class Event(object):
 
 
 
+class ServerThread(object):
+    def __init__(self, options):
+        self._sock = socket.socket(socket.AF_INET,
+                                  socket.SOCK_STREAM)
+        
+        self._sock.bind((IP, PORT))
+        self._sock.listen(self._options["Players"])
+        self._killed = False
+        
+    def run(self):
+        while not self._killed:
+            if len(self.Sockets > self._options["Players"]):
+                (clientsocket, address) = self._sock.accept()
+                self._tpool.addThread(ClientThread, address, clientsocket)
+                self._tpool.runThread(address)
+            else:
+                time.sleep(1)
+    
+    def kill(self):
+        self._killed = True
+
+
+
 class ClientThread(threading.Thread):
     def __init__(self, socket):
         threading.Thread.__init__(self)
@@ -114,7 +138,7 @@ class ClientThread(threading.Thread):
         self._interupted = False
         self._killed = False
         while not self._interupted:
-            self._checkinterupted()
+            self._checkRun()
     
     def interupt(self):
         self._interupted = True
@@ -125,15 +149,18 @@ class ClientThread(threading.Thread):
     def kill(self):
         self._killed = True
     
-    def _checkinterupted(self):
-        while self._interupted:
-            time.sleep(0.1)
+    def _checkRun(self):
+        while not (self._killed | self._interupted):
+            if self._killed: return True
+            elif self._interupted:
+                time.sleep(0.1)
+        return True
     
     def _read(self):
         if self.check()[0]:
             self._moving += 1
             if self._moving >= self._options["Timeout"]:
-                raise RuntimeError
+                raise RuntimeError("ClientThread %s timeout" % self.id)
         else:
             self._moving = 0
         while not self._check()[0]:
@@ -164,6 +191,6 @@ class ClientThread(threading.Thread):
         null, null, errorable = select.select([], [], [self._sock], timeout)
         del null
         
-        if bool(errorable): raise RuntimeError
+        if bool(errorable): raise RuntimeError("ClientThread %s socket raised error" % self.id)
         
         return (bool(readable), bool(writeable))

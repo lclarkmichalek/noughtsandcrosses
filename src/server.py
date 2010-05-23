@@ -3,19 +3,21 @@ import socket
 import threading
 import time
 import json
-
-IP = ""
-PORT = 0
-
 class Server(object):
-    def __init__(self, options):
+    def __init__(self, address, options):
         self._options = options
+        self._address = address
         
-        self._tpool = ThreadPool()
-        self._epool = EventPool(self._tpool)
+        self._epool = EventPool()
+        self._tpool = ThreadPool(self._epool)
     
     def start(self):
-        self._tpool.addThread(ServerThread, 'Server', self._options)
+        self._tpool.addThread(ServerThread, 'Server', self._address,
+                              self._options)
+        self._tpool.runThread('Server')
+    
+    def stop(self):
+        self._tpool.killAll()
 
     
 
@@ -24,11 +26,15 @@ class ThreadPool(object):
         self._threads = {}
         self._epool = eventpool
     
-    def addThread(self, thread, id, *args):
-        self._threads[id] = thread(*args)
+    def addThread(self, thread, id, *args, **kwargs):
+        self._threads[id] = thread(*args, **kwargs)
         self._threads[id].id = id
         self._threads[id]._tpool = self
+        self._threads[id]._epool = self._epool
         self._epool.addThread(self._threads[id])
+    
+    def runThread(self, id):
+        self._threads[id].start()
     
     def startThread(self, id):
         self._threads[id].start()
@@ -49,11 +55,17 @@ class ThreadPool(object):
         time.sleep(interval)
         del self._threads[id]
         self._epool.removeThread(id)
+    
+    def killAll(self):
+        #Can't use iterations because dict changes size when
+        #threads are deleted
+        while len(self._threads):
+            self.killThread(self._threads.keys()[0], 1)
 
 
 
 class EventPool(object):
-    def __init__(self, threadpool):
+    def __init__(self):
         self._queues = {}
         self._shutdown = False
     
@@ -66,12 +78,19 @@ class EventPool(object):
     def addEvent(self, event):
         if self._shutdown: return
         
+        print event.toJson()
+        
         for id in event.recipients:
             if not id in self._queues.keys():
                 raise RuntimeError("Message addressed to unknown recipient")
         
+        event.sender = threading.currentThread().id
+        
         for id in event.recipients:
             self._queues[id].appent(event)
+        
+        del event.recipients
+        del event.priority
     
     def queuedEvents(self):
         id = threading.currentThread().id
@@ -92,35 +111,46 @@ class EventPool(object):
 
 
 class Event(object):
-    def __init__(self, Header="", Content="", Recipients=[], Priority=0):
+    def __init__(self, Header="", Content=[], Recipients=[], Priority=0):
         self.header = Header
         self.content = Content
         self.recipients = Recipients
         self.priority = Priority
     
     def toJson(self):
-        message = json.dumps([self.header,self.content,self.recipients,self.priority])
+        message = json.dumps([self.header,self.content,self.recipients,
+                              self.priority])
         return message
 
-
-
-class ServerThread(object):
-    def __init__(self, options):
+class ServerThread(threading.Thread):
+    def __init__(self, address, options):
+        threading.Thread.__init__(self)
+        self._options = options
+        
         self._sock = socket.socket(socket.AF_INET,
                                   socket.SOCK_STREAM)
         
-        self._sock.bind((IP, PORT))
+        self._sock.bind(address)
         self._sock.listen(self._options["Players"])
         self._killed = False
         
+        self._noConnected = 0
+        
     def run(self):
         while not self._killed:
-            if len(self.Sockets > self._options["Players"]):
+            if self._noConnected < self._options["Players"]:
                 (clientsocket, address) = self._sock.accept()
                 self._tpool.addThread(ClientThread, address, clientsocket)
                 self._tpool.runThread(address)
+                self._noConnected += 1
             else:
                 time.sleep(1)
+    
+    def threadDisconnected(self):
+        self._noConnected -= 1
+    
+    def interupt(self):
+        pass
     
     def kill(self):
         self._killed = True
@@ -133,12 +163,38 @@ class ClientThread(threading.Thread):
         self._sock = socket
         self._sock.setblocking(0)
         self._moving = 0
+        self._options = {'Timeout': 1}
     
     def run(self):
         self._interupted = False
         self._killed = False
-        while not self._interupted:
-            self._checkRun()
+        
+        
+        while not self._checkRun():
+            
+            input = self._read()
+            if input is not '':
+                print input
+                self._addEvent(input)
+            
+            if self._checkRun(): break
+            
+            if self._epool.queuedEvents() > 0:
+                event = self._epool.nextEvent()
+                if event.header == "snd":
+                    self._write(event.toJson())
+                elif event.header == "strdat":
+                    self._data[event.content["key"]] = event.content["value"]
+                elif event.header == "rqstdat":
+                    key = event.content["key"]
+                    value = event.content["value"]
+                    ev = Event(Header = "snddat", recipients = [event.sender])
+                    ev.content = {value: key}
+                    self._epool.addEvent(ev)
+                elif event.header == "snddat":
+                    self._write(event.toJson())
+                
+                
     
     def interupt(self):
         self._interupted = True
@@ -149,18 +205,23 @@ class ClientThread(threading.Thread):
     def kill(self):
         self._killed = True
     
+    def _addEvent(self, input):
+        ev = json.loads(input)
+        self._epool.addEvent(Event(Header = ev[0], Content = ev[1],
+                                   Recipients = ev[2], Priority = ev[3]))
+    
     def _checkRun(self):
         while not (self._killed | self._interupted):
             if self._killed: return True
             elif self._interupted:
                 time.sleep(0.1)
-        return True
+        return False
     
     def _read(self):
-        if self.check()[0]:
+        if self._check()[0]:
             self._moving += 1
             if self._moving >= self._options["Timeout"]:
-                raise RuntimeError("ClientThread %s timeout" % self.id)
+                raise RuntimeError("ClientThread %s timeout" % str(self.id))
         else:
             self._moving = 0
         while not self._check()[0]:
@@ -191,6 +252,7 @@ class ClientThread(threading.Thread):
         null, null, errorable = select.select([], [], [self._sock], timeout)
         del null
         
-        if bool(errorable): raise RuntimeError("ClientThread %s socket raised error" % self.id)
+        if bool(errorable): raise RuntimeError(
+                    "ClientThread %s socket raised error" % self.id)
         
         return (bool(readable), bool(writeable))

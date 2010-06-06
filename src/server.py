@@ -81,13 +81,16 @@ class EventPool(object):
         print event.toJson()
         
         for id in event.recipients:
+            if id == "Self":
+                self._queues[threading.currentThread().id].append(event)
+            
             if not id in self._queues.keys():
-                raise RuntimeError("Message addressed to unknown recipient")
+                raise RuntimeWarning("Message addressed to unknown recipient")
+            
+            self._queues[id].appent(event)
         
         event.sender = threading.currentThread().id
-        
-        for id in event.recipients:
-            self._queues[id].appent(event)
+            
         
         del event.recipients
         del event.priority
@@ -187,7 +190,7 @@ class ClientThread(threading.Thread):
                     self._data[event.content["key"]] = event.content["value"]
                 elif event.header == "rqstdat":
                     key = event.content["key"]
-                    value = event.content["value"]
+                    value = self._data[key]
                     ev = Event(Header = "snddat", recipients = [event.sender])
                     ev.content = {value: key}
                     self._epool.addEvent(ev)
